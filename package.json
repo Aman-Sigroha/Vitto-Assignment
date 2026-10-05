@@ -1,0 +1,25 @@
+{
+  "name": "vitto-loan-repayment",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "node --test test/money.test.js test/schedule.test.js",
+    "db:setup": "node --env-file-if-exists=.env.local db/setup.js",
+    "db:seed": "node --env-file-if-exists=.env.local db/seed.js"
+  },
+  "dependencies": {
+    "next": "16.3.8",
+    "pg": "^8.23.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "eslint": "^9",
+    "eslint-config-next": "16.3.8"
+  }
+}
