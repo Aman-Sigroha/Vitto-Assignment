@@ -13,17 +13,42 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required for route integration tests. These tests do not mock PostgreSQL.");
 }
 
+const FIREBASE_TEST_ENV = [
+  "NEXT_PUBLIC_FIREBASE_API_KEY",
+  "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+  "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+  "FIREBASE_PROJECT_ID",
+  "FIREBASE_CLIENT_EMAIL",
+  "FIREBASE_PRIVATE_KEY",
+  "FIREBASE_TEST_EMAIL",
+  "FIREBASE_TEST_PASSWORD",
+];
+
+const missingFirebaseEnv = FIREBASE_TEST_ENV.filter((name) => !process.env[name]);
+const skipWithoutFirebase = missingFirebaseEnv.length === 0
+  ? false
+  : `Set ${missingFirebaseEnv.join(", ")} to run authenticated route tests.`;
+
 const createdLoanIds = [];
+let testToken;
 
 function loanContext(id) {
   return { params: Promise.resolve({ id: String(id) }) };
 }
 
-function jsonRequest(url, body) {
+function jsonRequest(url, body, { token = testToken } = {}) {
+  const headers = { "content-type": "application/json" };
+  if (token) headers.authorization = `Bearer ${token}`;
   return new Request(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
+  });
+}
+
+function authedGet(url) {
+  return new Request(url, {
+    headers: { authorization: `Bearer ${testToken}` },
   });
 }
 
@@ -43,6 +68,9 @@ async function createExampleLoan() {
 describe("loan and payment routes against PostgreSQL", () => {
   before(async () => {
     await applySchema(getPool());
+    if (missingFirebaseEnv.length === 0) {
+      testToken = await signInTestUser();
+    }
   });
 
   after(async () => {
@@ -60,7 +88,36 @@ describe("loan and payment routes against PostgreSQL", () => {
     await closePool();
   });
 
-  it("creates a loan and its full schedule", async () => {
+  it("rejects unauthenticated requests to every loan route", async () => {
+    const created = await createLoanRoute(jsonRequest("http://localhost/api/loans", {
+      principal: "200000.00",
+      annualInterestRate: "18",
+      tenureMonths: 24,
+      disbursementDate: "2024-01-15",
+    }, { token: null }));
+    assert.equal(created.status, 401);
+    assert.equal((await created.json()).error.code, "UNAUTHENTICATED");
+
+    const loaded = await getLoanRoute(
+      new Request("http://localhost/api/loans/1"),
+      loanContext("1"),
+    );
+    assert.equal(loaded.status, 401);
+    assert.equal((await loaded.json()).error.code, "UNAUTHENTICATED");
+
+    const paid = await recordPaymentRoute(
+      jsonRequest("http://localhost/api/loans/1/payments", {
+        amount: "5000.00",
+        paymentDate: "2024-03-05",
+        idempotencyKey: "missing-token",
+      }, { token: null }),
+      loanContext("1"),
+    );
+    assert.equal(paid.status, 401);
+    assert.equal((await paid.json()).error.code, "UNAUTHENTICATED");
+  });
+
+  it("creates a loan and its full schedule", { skip: skipWithoutFirebase }, async () => {
     const body = await createExampleLoan();
     assert.equal(body.loan.principal, "200000.00");
     assert.equal(body.loan.annualInterestRate, "18.0000");
@@ -79,9 +136,9 @@ describe("loan and payment routes against PostgreSQL", () => {
     assert.equal(body.position.overdueAmount, overdueFrom(body.installments, serverDate()));
   });
 
-  it("returns 404 for an unknown loan", async () => {
+  it("returns 404 for an unknown loan", { skip: skipWithoutFirebase }, async () => {
     const response = await getLoanRoute(
-      new Request("http://localhost/api/loans/9223372036854775806"),
+      authedGet("http://localhost/api/loans/9223372036854775806"),
       loanContext("9223372036854775806"),
     );
     const body = await response.json();
@@ -91,7 +148,7 @@ describe("loan and payment routes against PostgreSQL", () => {
     });
   });
 
-  it("returns a validation error for an invalid loan and does not require a successful insert", async () => {
+  it("returns a validation error for an invalid loan and does not require a successful insert", { skip: skipWithoutFirebase }, async () => {
     const response = await createLoanRoute(jsonRequest("http://localhost/api/loans", {
       principal: "0.00",
       annualInterestRate: "18",
@@ -104,7 +161,7 @@ describe("loan and payment routes against PostgreSQL", () => {
     assert.match(body.error.message, /Principal must be a positive amount/);
   });
 
-  it("records a payment, then returns the original result for the same idempotency key", async () => {
+  it("records a payment, then returns the original result for the same idempotency key", { skip: skipWithoutFirebase }, async () => {
     const created = await createExampleLoan();
     const idempotencyKey = `pay-${randomUUID()}`;
     const paymentBody = {
@@ -136,7 +193,7 @@ describe("loan and payment routes against PostgreSQL", () => {
     assert.deepEqual(secondBody.payment.allocations, firstBody.payment.allocations);
 
     const loaded = await getLoanRoute(
-      new Request(`http://localhost/api/loans/${created.loan.id}`),
+      authedGet(`http://localhost/api/loans/${created.loan.id}`),
       loanContext(created.loan.id),
     );
     const loadedBody = await loaded.json();
@@ -150,7 +207,7 @@ describe("loan and payment routes against PostgreSQL", () => {
     );
   });
 
-  it("rejects an invalid payment without changing the schedule", async () => {
+  it("rejects an invalid payment without changing the schedule", { skip: skipWithoutFirebase }, async () => {
     const created = await createExampleLoan();
     const response = await recordPaymentRoute(
       jsonRequest(`http://localhost/api/loans/${created.loan.id}/payments`, {
@@ -166,7 +223,7 @@ describe("loan and payment routes against PostgreSQL", () => {
     assert.match(body.error.message, /Payment amount/);
 
     const loaded = await getLoanRoute(
-      new Request(`http://localhost/api/loans/${created.loan.id}`),
+      authedGet(`http://localhost/api/loans/${created.loan.id}`),
       loanContext(created.loan.id),
     );
     const loadedBody = await loaded.json();
@@ -174,6 +231,24 @@ describe("loan and payment routes against PostgreSQL", () => {
     assert.equal(loadedBody.position.outstandingPrincipal, "200000.00");
   });
 });
+
+async function signInTestUser() {
+  const { getApp, getApps, initializeApp } = await import("firebase/app");
+  const { getAuth, signInWithEmailAndPassword } = await import("firebase/auth");
+  const app = getApps().length > 0
+    ? getApp()
+    : initializeApp({
+      apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+      authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    });
+  const credential = await signInWithEmailAndPassword(
+    getAuth(app),
+    process.env.FIREBASE_TEST_EMAIL,
+    process.env.FIREBASE_TEST_PASSWORD,
+  );
+  return credential.user.getIdToken();
+}
 
 function overdueFrom(installments, asOfDate) {
   return installments.reduce((total, installment) => {

@@ -48,7 +48,7 @@ For ₹2,00,000 at 18% over 24 months, the rounded EMI is ₹9,984.82, which is 
 
 ## API
 
-Routes call `requireRequestUser` before any loan or payment work. Firebase token checks are not implemented yet, so that function does not accept a user and does not enforce a token. Stage 5 will reject missing tokens with HTTP 401.
+Every loan and payment route calls `requireRequestUser` before it reads or writes data. The browser signs in with Firebase email/password, then sends `Authorization: Bearer <Firebase ID token>`. The server verifies that token with the Firebase Admin SDK. A missing, malformed, expired, or revoked token gets HTTP 401. The API does not accept a client-supplied user id, and loans are not owned by individual users.
 
 Money fields are decimal strings. A repeated idempotency key returns the stored payment with HTTP 200 and `duplicate: true`. It is not a 409, because the original payment is the response.
 
@@ -163,23 +163,50 @@ First success: HTTP 201. The same loan id and idempotency key again: HTTP 200.
 | Status | Code | When |
 | --- | --- | --- |
 | 400 | `VALIDATION_ERROR` | Invalid JSON or invalid loan, payment, or id input |
-| 401 | `UNAUTHENTICATED` | Reserved for Firebase verification |
+| 401 | `UNAUTHENTICATED` | Missing or invalid Firebase ID token |
 | 404 | `LOAN_NOT_FOUND` | Unknown loan id |
 | 422 | `PAYMENT_EXCEEDS_BALANCE` | Payment is larger than the remaining amount due |
 | 500 | `INTERNAL_ERROR` | Unexpected failure. The database error is not returned |
 
+## Firebase Authentication
+
+Create a Firebase project and enable the Email/Password sign-in provider.
+
+1. In Firebase console, open Project settings and copy the web app config into the `NEXT_PUBLIC_FIREBASE_*` variables. Those values are visible in the browser.
+2. Create a service account and download its JSON key. Put `project_id`, `client_email`, and `private_key` into `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`. Keep the private key on one line and replace real line breaks with `\n`. Do not prefix these with `NEXT_PUBLIC_`.
+3. In Authentication, add an email/password user. That is the account used to sign in. For route integration tests, put the same email and password in `FIREBASE_TEST_EMAIL` and `FIREBASE_TEST_PASSWORD`. Those two variables are not used by the app.
+
+Sign-in happens in the browser with the Firebase client SDK. `authorizedFetch` reads the current user's ID token and sends it as `Authorization: Bearer <token>`. `requireRequestUser` checks the header, then calls `verifyIdToken` with revocation checking. The returned user is only `uid` and `email` from that verified token.
+
+The home page has the sign-in and sign-out controls. Loan data on that page is not wired yet.
+
 ## Tests
 
-Unit tests, including schedule, money, allocation, and loan position:
+Unit tests, including schedule, money, allocation, loan position, and authentication header checks:
 
 ```bash
 npm test
 ```
 
-Route tests against real PostgreSQL. `DATABASE_URL` is required. The database is not mocked. Set it in the environment or in `.env.local`, then run:
+`npm test` does not call Firebase. It checks missing and malformed `Authorization` headers, including 401 responses from all three route handlers.
+
+Route tests against real PostgreSQL:
 
 ```bash
 npm run test:integration
 ```
 
-Those tests apply `db/schema.sql` and delete the loans they create.
+`DATABASE_URL` is required. The database is not mocked. The tests apply `db/schema.sql` and delete the loans they create.
+
+Unauthenticated requests to the three routes return 401 without Firebase credentials. Creating a loan, reading a loan, and recording a payment also require:
+
+- `NEXT_PUBLIC_FIREBASE_API_KEY`
+- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_CLIENT_EMAIL`
+- `FIREBASE_PRIVATE_KEY`
+- `FIREBASE_TEST_EMAIL`
+- `FIREBASE_TEST_PASSWORD`
+
+Those authenticated cases are skipped until every variable above is set. The tests sign in with the Firebase client SDK and send the real ID token. They do not bypass `requireRequestUser`.
