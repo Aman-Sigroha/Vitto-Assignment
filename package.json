@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test test/money.test.js test/schedule.test.js test/payment.test.js",
+    "test": "node --test test/money.test.js test/schedule.test.js test/payment.test.js test/position.test.js",
+    "test:integration": "node --env-file-if-exists=.env.local --test test/api.integration.test.js",
     "db:setup": "node --env-file-if-exists=.env.local db/setup.js",
     "db:seed": "node --env-file-if-exists=.env.local db/seed.js"
   },
