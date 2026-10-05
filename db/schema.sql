@@ -33,6 +33,20 @@ CREATE TABLE IF NOT EXISTS payments (
   UNIQUE (loan_id, idempotency_key)
 );
 
+-- Stores the original interest/principal split for one payment.
+-- A later payment changes installments.amount_paid, so the split cannot be
+-- reconstructed from the current balances when the same idempotency key is retried.
+CREATE TABLE IF NOT EXISTS payment_allocations (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  payment_id BIGINT NOT NULL REFERENCES payments (id),
+  installment_id BIGINT NOT NULL REFERENCES installments (id),
+  interest_allocated NUMERIC(14, 2) NOT NULL CHECK (interest_allocated >= 0),
+  principal_allocated NUMERIC(14, 2) NOT NULL CHECK (principal_allocated >= 0),
+  amount_paid_after NUMERIC(14, 2) NOT NULL CHECK (amount_paid_after >= 0),
+  CHECK (interest_allocated + principal_allocated > 0),
+  UNIQUE (payment_id, installment_id)
+);
+
 -- Unique (loan_id, installment_no) and (loan_id, idempotency_key) already index loan_id.
 CREATE INDEX IF NOT EXISTS installments_loan_id_due_date_idx
   ON installments (loan_id, due_date);
