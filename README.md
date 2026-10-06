@@ -30,7 +30,13 @@ npm run db:setup
 
 `db/schema.sql` creates `loans`, `installments`, `payments`, and `payment_allocations`. It is safe to run again: existing tables are left in place. `payments.loan_id` has a foreign key to `loans.id`. Money columns are `NUMERIC(14, 2)`.
 
-`npm run db:seed` applies the same schema. It does not insert loans yet.
+`npm run db:seed` applies the same schema, then inserts three loans if those seed loans are not already present. Running it again reuses the same rows and the same partial payment. It prints each loan id. Set `NEXT_PUBLIC_SEEDED_LOAN_ID` to the overdue loan id from that output, then restart the app. That value is public and is different in each database, so it stays in the environment rather than in source.
+
+| Seeded loan | ID | Purpose/state | What the evaluator should see |
+| --- | --- | --- | --- |
+| Current loan | Printed by `npm run db:seed` | ₹2,50,000 at 14% for 18 months, disbursed on the first day of the current month, no payments | Next installment is due today or later, and overdue amount is 0.00 |
+| Overdue loan | Printed by `npm run db:seed`. This is the id for `NEXT_PUBLIC_SEEDED_LOAN_ID` | ₹1,80,000 at 18% for 12 months, disbursed 2024-03-15, no payments | Overdue amount is greater than 0.00, because the first installment was due 2024-04-15 and is still unpaid |
+| Partially paid loan | Printed by `npm run db:seed` | ₹2,00,000 at 18% for 24 months, disbursed 2025-06-15, one payment of ₹5,000.00 on 2025-07-20 | Installment 1 is partly paid. The payment uses idempotency key `seed-partial-installment-v1` |
 
 You can also export `DATABASE_URL` in the shell instead of using `.env.local`. The scripts load `.env.local` only when that file exists, and they do not override variables already set in the environment.
 
