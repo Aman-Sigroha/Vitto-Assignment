@@ -178,11 +178,11 @@ Create a Firebase project and enable the Email/Password sign-in provider.
 
 Sign-in happens in the browser with the Firebase client SDK. `authorizedFetch` reads the current user's ID token and sends it as `Authorization: Bearer <token>`. `requireRequestUser` checks the header, then calls `verifyIdToken` with revocation checking. The returned user is only `uid` and `email` from that verified token.
 
-The home page has the sign-in and sign-out controls. Loan data on that page is not wired yet.
+The home page signs in with email and password, then opens the loan identified by `NEXT_PUBLIC_SEEDED_LOAN_ID`. That public id is the seeded loan the deployed UI shows. The page does not list every loan. After a payment, it requests that same loan again and replaces the schedule and position. It does not reload the browser.
 
 ## Tests
 
-Unit tests, including schedule, money, allocation, loan position, and authentication header checks:
+Unit tests, including schedule, money, allocation, loan position, authentication header checks, and the dashboard:
 
 ```bash
 npm test
