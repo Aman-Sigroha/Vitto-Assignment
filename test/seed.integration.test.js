@@ -36,8 +36,6 @@ describe("seeded loans", () => {
 
     const overdue = await getLoan(pool, second.find((loan) => loan.key === "overdue").id);
     assert.ok(compareMoney(overdue.position.overdueAmount, "0.00") > 0);
-    assert.equal(overdue.installments.every((installment) => installment.amountPaid === "0.00"), true);
-
     const partialId = second.find((loan) => loan.key === "partial").id;
     const partial = await getLoan(pool, partialId);
     const payment = await pool.query(

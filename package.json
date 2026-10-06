@@ -9,9 +9,10 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --test test/money.test.js test/schedule.test.js test/payment.test.js test/position.test.js test/auth.test.js test/dashboard.test.js test/seed.test.js",
-    "test:integration": "node --env-file-if-exists=.env.local --test test/api.integration.test.js test/seed.integration.test.js",
+    "test:integration": "node --env-file-if-exists=.env.local --test --test-concurrency=1 test/api.integration.test.js test/seed.integration.test.js",
     "db:setup": "node --env-file-if-exists=.env.local db/setup.js",
-    "db:seed": "node --env-file-if-exists=.env.local db/seed.js"
+    "db:seed": "node --env-file-if-exists=.env.local db/seed.js",
+    "test:all": "npm test && npm run test:integration"
   },
   "dependencies": {
     "firebase": "^12.19.0",
